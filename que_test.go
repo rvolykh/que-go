@@ -1,17 +1,46 @@
 package que
 
 import (
+	"log"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/jackc/pgx"
 )
 
 var testConnConfig = pgx.ConnConfig{
-	Host:     "localhost",
-	Database: "que-go-test",
+	Host:     env("DB_HOST", "localhost"),
+	Port:     envInt("DB_PORT", 5432),
+	Database: env("DB_DATABASE", "que-go-test"),
+	User:     env("DB_USER", "postgres"),
+	Password: env("DB_PASSWORD", "postgres"),
+}
+
+func env(key string, defaultValue string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultValue
+}
+
+func envInt(key string, defaultValue uint16) uint16 {
+	if v := os.Getenv(key); v != "" {
+		num, err := strconv.ParseUint(v, 10, 16)
+		if err != nil {
+			log.Fatalln(err.Error())
+		}
+		return uint16(num)
+	}
+	return defaultValue
 }
 
 func openTestClientMaxConns(t testing.TB, maxConnections int) *Client {
+	err := Migrate(testConnConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	connPoolConfig := pgx.ConnPoolConfig{
 		ConnConfig:     testConnConfig,
 		MaxConnections: maxConnections,
@@ -21,6 +50,7 @@ func openTestClientMaxConns(t testing.TB, maxConnections int) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return NewClient(pool)
 }
 

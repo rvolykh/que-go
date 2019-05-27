@@ -1,12 +1,15 @@
 package que
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/pgtype"
+	"github.com/satori/go.uuid"
 )
 
 // Job is a single unit of work for Que to perform.
@@ -41,6 +44,10 @@ type Job struct {
 	// LastError is the error message or stack trace from the last time the job
 	// failed. It is ignored on job creation.
 	LastError pgtype.Text
+
+	// Callback is channel name to which notification will be posted when job
+	// is finished. Overridden on job creation.
+	Callback string
 
 	mu      sync.Mutex
 	deleted bool
@@ -151,6 +158,43 @@ func (c *Client) EnqueueInTx(j *Job, tx *pgx.Tx) error {
 	return execEnqueue(j, tx)
 }
 
+// EnqueueAndWait does the same as Enqueue, but additionally listen for
+// callback notification from PostgreSQL. It is processor implementation
+// responsibility to send notification to callback channel.
+func (c *Client) EnqueueAndWait(ctx context.Context, j *Job) (string, error) {
+	conn, err := c.pool.Acquire()
+	if err != nil {
+		return "", err
+	}
+	defer c.pool.Release(conn)
+
+	callback := uuid.NewV4().String()
+
+	err = conn.Listen(callback)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Unlisten(callback)
+
+	j.Callback = callback
+
+	err = execEnqueue(j, c.pool)
+	if err != nil {
+		return "", err
+	}
+
+	event, err := conn.WaitForNotification(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if event.Channel != callback {
+		return "", fmt.Errorf("unexpected notification from a channel %s", event.Channel)
+	}
+
+	return event.Payload, nil
+}
+
 func execEnqueue(j *Job, q queryable) error {
 	if j.Type == "" {
 		return ErrMissingType
@@ -188,7 +232,7 @@ func execEnqueue(j *Job, q queryable) error {
 		args.Status = pgtype.Present
 	}
 
-	_, err := q.Exec("que_insert_job", queue, priority, runAt, j.Type, args)
+	_, err := q.Exec("que_insert_job", queue, priority, runAt, j.Type, args, j.Callback)
 	return err
 }
 
@@ -239,6 +283,7 @@ func (c *Client) LockJob(queue string) (*Job, error) {
 			&j.Type,
 			&j.Args,
 			&j.ErrorCount,
+			&j.Callback,
 		)
 		if err != nil {
 			c.pool.Release(conn)

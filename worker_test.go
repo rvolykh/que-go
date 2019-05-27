@@ -1,12 +1,14 @@
 package que
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/pgtype"
 )
@@ -248,4 +250,37 @@ func TestWorkerWorkOneTypeNotInMap(t *testing.T) {
 		t.Errorf("want LastError=%q, got %q", want, j.LastError.String)
 	}
 
+}
+
+func TestWorkerEnqueueAndWait(t *testing.T) {
+	const want = `{"status": "done"}`
+
+	c := openTestClient(t)
+	defer truncateAndClose(c.pool)
+
+	wm := WorkMap{
+		"MyJob": func(j *Job) error {
+			_, err := j.Conn().Exec("SELECT pg_notify($1::text, $2::text);", j.Callback, want)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	w := NewWorker(c, wm)
+	w.Interval = 50 * time.Millisecond
+	go w.Work()
+	defer w.Shutdown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1 * time.Minute)
+	defer cancel()
+
+	payload, err := c.EnqueueAndWait(ctx, &Job{Type: "MyJob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if payload != want {
+		t.Fatalf("\twant: %s,\n\tgot: %s\n", want, payload)
+	}
 }
