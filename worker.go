@@ -36,6 +36,8 @@ type Worker struct {
 	mu   sync.Mutex
 	done bool
 	ch   chan struct{}
+
+	log Logger
 }
 
 var defaultWakeInterval = 5 * time.Second
@@ -64,7 +66,12 @@ func NewWorker(c *Client, m WorkMap) *Worker {
 		c:        c,
 		m:        m,
 		ch:       make(chan struct{}),
+		log:      new(stdLogger),
 	}
+}
+
+func (w *Worker) SetLogger(logger Logger) {
+	w.log = logger
 }
 
 // Work pulls jobs off the Worker's Queue at its Interval. This function only
@@ -73,7 +80,7 @@ func (w *Worker) Work() {
 	for {
 		select {
 		case <-w.ch:
-			log.Println("worker done")
+			w.log.Println("worker done")
 			return
 		case <-time.After(w.Interval):
 			for {
@@ -88,7 +95,7 @@ func (w *Worker) Work() {
 func (w *Worker) WorkOne() (didWork bool) {
 	j, err := w.c.LockJob(w.Queue)
 	if err != nil {
-		log.Printf("attempting to lock job: %v", err)
+		w.log.Printf("attempting to lock job: %v", err)
 		return
 	}
 	if j == nil {
@@ -102,9 +109,9 @@ func (w *Worker) WorkOne() (didWork bool) {
 	wf, ok := w.m[j.Type]
 	if !ok {
 		msg := fmt.Sprintf("unknown job type: %q", j.Type)
-		log.Println(msg)
+		w.log.Println(msg)
 		if err = j.Error(msg); err != nil {
-			log.Printf("attempting to save error on job %d: %v", j.ID, err)
+			w.log.Printf("attempting to save error on job %d: %v", j.ID, err)
 		}
 		return
 	}
@@ -115,9 +122,9 @@ func (w *Worker) WorkOne() (didWork bool) {
 	}
 
 	if err = j.Delete(); err != nil {
-		log.Printf("attempting to delete job %d: %v", j.ID, err)
+		w.log.Printf("attempting to delete job %d: %v", j.ID, err)
 	}
-	log.Printf("event=job_worked job_id=%d job_type=%s", j.ID, j.Type)
+	w.log.Printf("event=job_worked job_id=%d job_type=%s", j.ID, j.Type)
 	return
 }
 
@@ -133,7 +140,7 @@ func (w *Worker) Shutdown() {
 		return
 	}
 
-	log.Println("worker shutting down gracefully...")
+	w.log.Println("worker shutting down gracefully...")
 	w.ch <- struct{}{}
 	w.done = true
 	close(w.ch)
@@ -165,6 +172,7 @@ type WorkerPool struct {
 	WorkMap  WorkMap
 	Interval time.Duration
 	Queue    string
+	Logger   Logger
 
 	c       *Client
 	workers []*Worker
@@ -191,6 +199,9 @@ func (w *WorkerPool) Start() {
 		w.workers[i] = NewWorker(w.c, w.WorkMap)
 		w.workers[i].Interval = w.Interval
 		w.workers[i].Queue = w.Queue
+		if w.Logger != nil {
+			w.workers[i].SetLogger(w.Logger)
+		}
 		go w.workers[i].Work()
 	}
 }

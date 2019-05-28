@@ -54,7 +54,7 @@ WITH RECURSIVE jobs AS (
     ) AS t1
   )
 )
-SELECT queue, priority, run_at, job_id, job_class, args, error_count, callback
+SELECT queue, priority, run_at, job_id, job_class, args, error_count, callback, cid
 FROM jobs
 WHERE locked
 LIMIT 1
@@ -86,9 +86,9 @@ AND   job_id    = $7::bigint
 
 	sqlInsertJob = `
 INSERT INTO que_jobs
-(queue, priority, run_at, job_class, args, callback)
+(queue, priority, run_at, job_class, args, callback, cid)
 VALUES
-(coalesce($1::text, ''::text), coalesce($2::smallint, 100::smallint), coalesce($3::timestamptz, now()::timestamptz), $4::text, coalesce($5::json, '[]'::json), $6)
+(coalesce($1::text, ''::text), coalesce($2::smallint, 100::smallint), coalesce($3::timestamptz, now()::timestamptz), $4::text, coalesce($5::json, '[]'::json), $6, $7)
 `
 
 	sqlDeleteJob = `

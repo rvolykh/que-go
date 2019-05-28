@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS que_jobs
   last_error  text,
   queue       text        NOT NULL DEFAULT '',
   callback    text        NOT NULL DEFAULT '',
+  cid         text        NOT NULL DEFAULT '',
 
   CONSTRAINT que_jobs_pkey PRIMARY KEY (queue, priority, run_at, job_id)
 );

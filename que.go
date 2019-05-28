@@ -49,6 +49,9 @@ type Job struct {
 	// is finished. Overridden on job creation.
 	Callback string
 
+	// Correlation ID
+	Cid string
+
 	mu      sync.Mutex
 	deleted bool
 	pool    *pgx.ConnPool
@@ -232,7 +235,7 @@ func execEnqueue(j *Job, q queryable) error {
 		args.Status = pgtype.Present
 	}
 
-	_, err := q.Exec("que_insert_job", queue, priority, runAt, j.Type, args, j.Callback)
+	_, err := q.Exec("que_insert_job", queue, priority, runAt, j.Type, args, j.Callback, j.Cid)
 	return err
 }
 
@@ -284,6 +287,7 @@ func (c *Client) LockJob(queue string) (*Job, error) {
 			&j.Args,
 			&j.ErrorCount,
 			&j.Callback,
+			&j.Cid,
 		)
 		if err != nil {
 			c.pool.Release(conn)
